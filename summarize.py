@@ -1,3 +1,4 @@
+import sys
 import argparse
 import requests
 import json
@@ -19,7 +20,6 @@ client = genai.Client(api_key = load_dotenv("GEMINI_API_KEY"))
 ## Status: DONE
 
 # code for an extra argument on the command line
-
 parser = argparse.ArgumentParser()
 parser.add_argument('--url', type = str, required = True)
 args = parser.parse_args()
@@ -32,22 +32,21 @@ args = parser.parse_args()
 
 def get_text(url):
 
-    """Extracts HTML content from teh URL to extract the main text."""
+    """Extracts HTML content from the URL to extract the main text."""
     
     try:
         response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout = 10)
         response.raise_for_status()
     
-    except requests.exceptions.RequestException as e:
-        return RuntimeError(f"Network error, try again with a different link: {e}")
+    except Exception:
+        sys.exit(f"An error has occured, try again with a different link.")
     
     soup = BeautifulSoup(response.text, "html.parser")
 
     results = [p.get_text() for p in soup.find_all("p")]
     
     if not results:
-        print("No text content found at the URL. Try again.")
-        return
+        sys.exit("No text content found at the URL. Try again.")
     
     return results
 
@@ -56,8 +55,7 @@ def get_text(url):
 
 ###------------------------------------------------------###
 ### Actual Summarizer
-# Status: Not Started
-
+# Status: DONE
 def summarize_text(url):     
 
     url_text = get_text(url)
@@ -74,48 +72,34 @@ def summarize_text(url):
         f'Put the provided source URL "{url if url else "N/A"} "into the "url" field.'
         f'Put the provided source URL "{url if url else "N/A"} "into the "references" field.'
         "All this information should be given in true JSON format, url, summary, keywords, and references."
+        "If the given URL is invalid, stop the program and print out the error code."
 
-        # """
-        # Expected Terminal Output:
-        
-        # From URL: {url}
-
-        # Summary: 
-        # ...(3 sentence paragraph here)...
-
-        # Keywords:...
-
-        # References: {url}
-        # """
     )
-    try:
-        response = client.models.generate_content(
-            model = "gemini-1.5-flash",
-            config = types.GenerateContentConfig(
-                temperature= 0.1,
-                top_p = 0.8,
-                top_k = 50,
-                max_output_tokens = 512
-            ),
-            contents = f"{SYSTEM}\n\n[Input]\n{url_text}\n\n[Task]\n{TASK}"
-        )
+    
+    response = client.models.generate_content(
+        model = "gemini-1.5-flash",
+        config = types.GenerateContentConfig(
+            temperature= 0.1,
+            top_p = 0.8,
+            top_k = 50,
+            max_output_tokens = 512
+        ),
+        contents = f"{SYSTEM}\n\n[Input]\n{url_text}\n\n[Task]\n{TASK}"
+    )
 
-        results = response.text.strip()
+    results = response.text.strip()
 
-        proper_json = results.strip("```json").strip("```")
+    proper_json = results.strip("```json").strip("```")
 
-        data = json.loads(proper_json)
-        json_output = json.dumps(data, indent=4)
-        with open("output.json", "w") as f:
-            f.write(json_output)
+    data = json.loads(proper_json)
+    json_output = json.dumps(data, indent=4)
+    with open("output.json", "w") as f:
+        f.write(json_output)
 
-        print(f"\nFrom URL: {data.get('url')}\n")
-        print(f"Summary:\n {data.get('summary')}\n")
-        print(f"Keywords: {data.get('keywords')}\n")
-        print(f"References: {data.get('references')}\n")
+    print(f"\nFrom URL: {data.get('url')}\n")
+    print(f"Summary:\n {data.get('summary')}\n")
+    print(f"Keywords: {data.get('keywords')}\n")
+    print(f"References: {data.get('references')}\n")
 
-    except Exception as e:
-        print(f"An error has occured during the summarization of the article, please try again: {e}")
-        return
-
+# print(get_text(args.url))
 summarize_text(args.url)
