@@ -1,5 +1,6 @@
 import argparse
 import requests
+import json
 from google import genai 
 from google.genai import types
 from dotenv import load_dotenv
@@ -29,20 +30,26 @@ args = parser.parse_args()
 
 ###------------------------------------------------------###
 
-def get_text(url:str) -> str:
+def get_text(url):
 
     """Extracts HTML content from teh URL to extract the main text."""
+    
+    try:
+        response = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout = 10)
+        response.raise_for_status()
+    
+    except requests.exceptions.RequestException as e:
+        return RuntimeError(f"Network error, try again with a different link: {e}")
+    
+    soup = BeautifulSoup(response.text, "html.parser")
 
-    response = requests.get(url)
-
-    if response.status_code == 200:
-        soup = BeautifulSoup(response.text, "html.parser")
-
-        results = [p.get_text(strip=True) for p in soup.find_all("p")]
-        
-        return "\n".join(results)
-    else:
-        return f"Failed to retrieve data: {response.status_code}"
+    results = [p.get_text() for p in soup.find_all("p")]
+    
+    if not results:
+        print("No text content found at the URL. Try again.")
+        return
+    
+    return results
 
 # tests if article text is working correctly
 # print(get_text(args.url))
@@ -51,78 +58,64 @@ def get_text(url:str) -> str:
 ### Actual Summarizer
 # Status: Not Started
 
-def summarize_text(url:str) -> str:     
+def summarize_text(url):     
 
     url_text = get_text(url)
 
-    ### No JSON
-    # prompt = f"""
-    # You are a professional summarization assistant. 
-
-    # Your task is to:
-    # - produce a summary of the given URL in 3 sentences.
-    # - include at least 5 core keywords/phrases from the source (no duplicates).
-    # - put the provided source URL "{url if url else "N/A"} into the References field.
-    # - do not create facts that are not present in the orignal source.
-    # - the output language should match the input language.
-    
-    # Output Format:
-    
-    # From URL: {url}
-
-    # Summary:
-    # ...(your 3 sentence paragraph here)...
-
-    # Keywords:...
-    # References: {url}
-    # """
-
-    ### With JSON
-    # prompt = f"""
-    # You are a professional summarization assistant. 
-    # Always output only valid JSON, no code block or extra explanation.
-
-    # Your task is to:
-    # - produce a summary of the given URL in 3 sentences.
-    # - include at least 5 core keywords/phrases from the source (no duplicates).
-    # - put the provided source URL "{url if url else "N/A"} into the References field.
-    # - do not create facts that are not present in the orignal source.
-    # - the output language should match the input language.
-    
-    # Output Format:
-    
-    # From URL: {url}
-
-    # Summary:
-    # ...(your 3 sentence paragraph here)...
-
-    # Keywords:...
-    # References: {url}
-    # """
-
     ### Class Example
     SYSTEM = (
-        'You are a professional summarization assistant.'
-        'Always output only valid JSON, no code block or extra explanation.'
-        'JSON schema: {"summary": "...", "keywords": ["...","...","...","...","..."], "source": "URL or N/A"}'
+        "You are a professional summarization assistant."
+        "Do not invent facts that are not present in the source."
+        "Always output only pure JSON, no code block or extra explanation."
     )
     TASK = (
         "Produce a summary of the given URL in 3 sentences."
         "Include at least 5 core keywords/phrases from the source (no duplicates)."
-        f'Put the provided source URL "{url if url else "N/A"} "into the "source" field.'
-        "The output language should match the input language."
-    )
+        f'Put the provided source URL "{url if url else "N/A"} "into the "url" field.'
+        f'Put the provided source URL "{url if url else "N/A"} "into the "references" field.'
+        "All this information should be given in true JSON format, url, summary, keywords, and references."
 
-    response = client.models.generate_content(
-        model = "gemini-1.5-flash",
-        config = types.GenerateContentConfig(
-            temperature= 0.1,
-            top_p = 0.8,
-            top_k = 50,
-            max_output_tokens = 512
-        ),
-        contents = f"{SYSTEM}\n\n[Input]\n{url_text}\n\n[Task]\n{TASK}"
-    )
-    return response.text
+        # """
+        # Expected Terminal Output:
+        
+        # From URL: {url}
 
-print(summarize_text(args.url))
+        # Summary: 
+        # ...(3 sentence paragraph here)...
+
+        # Keywords:...
+
+        # References: {url}
+        # """
+    )
+    try:
+        response = client.models.generate_content(
+            model = "gemini-1.5-flash",
+            config = types.GenerateContentConfig(
+                temperature= 0.1,
+                top_p = 0.8,
+                top_k = 50,
+                max_output_tokens = 512
+            ),
+            contents = f"{SYSTEM}\n\n[Input]\n{url_text}\n\n[Task]\n{TASK}"
+        )
+
+        results = response.text.strip()
+
+        proper_json = results.strip("```json").strip("```")
+
+        data = json.loads(proper_json)
+        json_output = json.dumps(data, indent=4)
+        with open("output.json", "w") as f:
+            f.write(json_output)
+
+        print(f"\nFrom URL: {data.get('url')}\n")
+        print(f"Summary:\n {data.get('summary')}\n")
+        print(f"Keywords: {data.get('keywords')}\n")
+        print(f"References: {data.get('references')}\n")
+
+    except Exception as e:
+        print(f"An error has occured during the summarization of the article, please try again: {e}")
+        return
+
+summarize_text(args.url)
